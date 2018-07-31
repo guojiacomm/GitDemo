@@ -186,13 +186,17 @@ static  void  AppTaskStart (void *p_arg)
 #ifdef CPU_CFG_INT_DIS_MEAS_EN
     CPU_IntDisMeasMaxCurReset();
 #endif
-		
+
+#if 0
 	/* 创建应用程序的任务 */
 	AppTaskCreate();
 	
 	/* 创建任务通信 */
 	AppObjCreate();
-	
+#else
+	AppTaskCreate();
+	AppObjCreate();
+#endif
     while(1)
     {
 		/* 1ms一次触摸扫描，电阻触摸屏 */
