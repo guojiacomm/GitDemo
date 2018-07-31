@@ -1,0 +1,107 @@
+*********************************************************************************************************
+*	                                  
+*	版    本 : V1.0
+*	说    明 : 本实验主要实现uCOS-II+STemWin+FatFS+USB Devce综合
+*              实验目的：
+*                1. 学习uCOS-II+STemWin+FatFS+USB Devce综合 
+*                2. 本实验是实现SD卡模式U盘，SD卡的盘符在电脑识别出来的过程稍微慢一些，大家使用时
+*                   等下即可。使用的是MicroUSB接口。
+*              实验内容：
+*                1. 共创建了如下几个任务，通过按下按键K1可以通过串口打印任务堆栈使用情况
+*                   ==================================================
+*                  优先级 使用栈 剩余栈 百分比 利用率   任务名
+*                  Prio   Used  Free   Per    CPU     Taskname
+*                   28    365    659   35%   12.79%   App Task GUI
+*                    5     42    470   08%    0.00%   App Task COM
+*                    4    179    333   34%    0.04%   App Task UserIF
+*                    3     59    453   11%    0.00%   App Msp Pro
+*                    2     56    456   10%    1.52%   App Task Start
+*                   29     48     80   37%    0.01%   uC/OS-III Timer Task
+*                   30     46     54   46%    0.17%   uC/OS-III Stat Task
+*                    1     46     82   35%    1.14%   uC/OS-III Tick Task
+*                   31     34     94   26%   84.30%   uC/OS-III Idle Task
+*                    串口软件建议使用SecureCRT（V6光盘里面有此软件）查看打印信息。
+*                    App Task Start任务  ：实现按键扫描。
+*                    App Task MspPro任务 ：实现截图功能，将图片以BMP格式保存到SD卡中。
+*                    App Task UserIF任务 ：按键消息处理。
+*                    App Task COM任务    ：LED闪烁。
+*                    App Task GUI任务    ：GUI任务。
+*                2. (1) 凡是用到printf函数的全部通过函数App_Printf实现。
+*                   (2) App_Printf函数做了信号量的互斥操作，解决资源共享问题。
+*                3. K2按键按下，实现截图功能，将图片以BMP格式保存到SD卡中。
+*                4. emWin界面上的两个按钮分别实现打开USB设备和关闭USB设备
+*              注意事项：
+*                 1. 如果用户通过MDK或者IAR编译器开启FPU，那么使用了浮点运算的任务在创建的时候
+*                    务必要使能参数OS_OPT_TASK_SAVE_FP，切记！ 没有用到浮点运算的任务不需要此参数，
+*                    设置了此参数才可以对浮点寄存器进行入栈和出栈操作。
+*                 2. 为了支持uC/Probe调试组件:
+*                      (1).MDK要勾选option->output -> Debug Infomation选项，选择优化等级0
+*                      (2).IAR要选择选择优化等级low，其中如下两个地方比勾选
+*                        a. option->C/C++ Compiler->Output选项中勾选Generate debug information。
+*                        b. option->linker->Output选项中勾选Include Generate debug information in output。
+*                      (3).使能uCOS-III宏定义
+*                          #define OS_CFG_DBG_EN             1u
+*                      	   #define OS_CFG_STAT_TASK_EN       1u 同时初始化统计任务
+*                      	   #define CPU_CFG_INT_DIS_MEAS_EN   1u 
+*                      (4).为了方便调试，参数OS_CFG_APP_HOOKS_EN，OS_CFG_ARG_CHK_EN都使能
+*                 3. 支持IAR7.5自带的uCOS-III调试组件。
+*                 4. 本实验推荐使用串口软件SecureCRT，要不串口打印效果不整齐。此软件在
+*                    V6开发板光盘里面有。
+*                 5. 务必将编辑器的缩进参数和TAB设置为4来阅读本文件，要不代码显示不整齐。
+*
+*	修改记录 :
+*		版本号   日期         作者            说明
+*       V1.0    2016-02-18   Eric2013    1. ST固件库1.6.1版本
+*                                        2. BSP驱动包V1.2
+*                                        3. uCOS-II版本V3.05.00
+*                                        4. uC/CPU版本V1.30.02
+*                                        5. uC/LIB版本V1.38.01
+*                                        6. FatFS版本V0.11a
+*                                       
+*	Copyright (C), 2015-2020, 安富莱电子 www.armfly.com
+*
+*********************************************************************************************************
+
+
+
+
+
+
+友情提示:
+=========================================================================================================================
+1. 如果用户需要使用其它时钟主频，比如168MHz，180MHz或者192MHz的超频，请在system_stm32f4xx.c文件的PLL_N，PLL_M，PLL_P
+和PLL_Q的参数配置部分，选择相应的条件编译。为了保证稳定的系统时钟和正确的USB, SDIO，RNG时钟频率，建议用户选择168MHz。
+
+2. 如果用采用不同的外部晶振，请修改stm32f4xx.h文件里面的HSE_VALUE宏定义和system_stm32f4xx.c文件中的PLL_N，PLL_M，PLL_P
+和PLL_Q的参数。
+
+3. BSP驱动包里面的中断全部更换为使用uCOS-II自己的API，具体定义在bsp.h文件里面实现，定义如下：
+   #define uCOS_EN       1
+
+	#if uCOS_EN == 1    
+		#include "os.h"   
+
+		#define  ENABLE_INT()      OS_EXIT_CRITICAL()     /* 使能全局中断 */
+		#define  DISABLE_INT()     OS_ENTER_CRITICAL()    /* 禁止全局中断 */
+	#else
+		/* 开关全局中断的宏 */
+		#define ENABLE_INT()	__set_PRIMASK(0)	/* 使能全局中断 */
+		#define DISABLE_INT()	__set_PRIMASK(1)	/* 禁止全局中断 */
+	#endif
+
+4. 中断优先级分组采用NVIC_PriorityGroupConfig(NVIC_PriorityGroup_4); 可配置0-15级抢占式优先级，0级子优先级，即不存在子优先级。
+   抢占式优先级的数值越小，优先级越高，0表示最高优先级，15表示最低优先级。
+   -------------
+   USART1串口中断               :抢占式优先级为1， 子优先级为0。
+   PendSV中断                  :抢占式优先级为15，子优先级为0。
+   SysTick中断                 :抢占式优先级为15，子优先级为0， 用户可以在os_cpu.h文件里面修改为其它优先级。
+   LTDC Line中断               :抢占式优先级为0， 子优先级为0。
+   SDIO中断                    :抢占式优先级为0， 子优先级为0。
+   SDIO使用的DMA2_Stream3中断  :抢占式优先级为1， 子优先级为0。
+   OTG_FS_IRQn
+   OTG_HS_EP1_OUT_IRQn
+   OTG_HS_EP1_IN_IRQn         :抢占式优先级为1， 子优先级为0。
+     
+=========================================================================================================================
+   
+   

@@ -1,0 +1,121 @@
+==========================================================================
+文件名：USB Mass Storage 模块移植和使用说明
+
+----Eric2013整理于2016-02-26
+
+【移植说明】
+安富莱移植的USB Mass Storage 应用说明：
+usb_mass_storage 文件夹的文件主要来自于ST的USB固件库2.2.0版本中的范例
+官方下载地址：
+http://www.st.com/web/catalog/tools/FM147/CL1794/SC961/SS1743/PF257882
+安富莱电子对齐进行了整理。使其可以方便地添加到不同的工程中去。
+
+---------------------当前的SD卡模拟U盘是用的MicrUSB接口---------------------
+
+
+移植步骤如下：
+1. 在工程中添加USB固件库：STM32_USB_Device_Library 和 STM32_USB_OTG_Driver
+	STM32_USB_Device_Library\Core\Core
+	STM32_USB_Device_Library\Class\msc
+	STM32_USB_OTG_Driver\src	
+	
+   具体添加的文件参考此工程，就不一一详述了，注意部分文件在软件包的工程文件夹下。
+   
+2. 添加usbd_desc.c，usbd_storage_msd.c，usbd_usr.c，usb_bsp.c和相应的.h文件到User文件夹下的usbd_mass_storage文件夹下。
+   -----
+   其中usb_bsp.c此文件做较大修改，具体看此文件实现即可。这几个文件是在官方工程的具体实现文件夹下。
+   
+3. 整理USB的中断到一个专门新建的usb_it.c文件里，具体参考源文件即可。
+
+4. 整理并修改usbd_usr.c文件。
+   （1）全局变量 USB_OTG_dev 定义在 usbd_usr.c 文件
+	   #ifdef USB_OTG_HS_INTERNAL_DMA_ENABLED
+		#if defined ( __ICCARM__ ) /*!< IAR Compiler */
+		 #pragma data_alignment=4
+		#endif
+	   #endif 
+
+	__ALIGN_BEGIN  USB_OTG_CORE_HANDLE  USB_OTG_dev   __ALIGN_END;
+	__ALIGN_BEGIN  USB_OTG_CORE_HANDLE  USB_OTG_Core  __ALIGN_END;
+	   
+   （2）全局变量USB_OTG_CORE_HANDLE  USB_OTG_Core;也定义在此文件
+   （3）添加两个新函数，方便调用。
+		/* 使能U盘设备 ****************************/
+		void usbd_OpenMassStorage(void)
+		{
+			USBD_Init(&USB_OTG_dev,
+					USB_OTG_FS_CORE_ID,
+					&USR_desc,
+					&USBD_MSC_cb,
+					&USRD_cb);
+		}
+
+		/* 移除U盘设备 ***************************/
+		void usbd_CloseMassStorage(void)
+		{
+			DCD_DevDisconnect(&USB_OTG_dev);
+
+			USB_OTG_BSP_DisableInterrupt();	
+		}
+   （4）添加如下调试(测试发现这个文件里面的打印功能不太好用，一旦开启，造成无法识别设备)：
+        //#define usb_printf	printf
+        #define usb_printf(...)
+		
+		这个文件的源文件是LCD调试的，故将其修改为了串口打印的形式。
+	(5) 修改USBD_Usr_cb_TypeDef USR_cb为USBD_Usr_cb_TypeDef USRD_cb。
+	     此文件的.h文件也要做相应的extern修改。
+	(6) 注释掉文件   //#include "lcd_log.h"
+   
+   
+5. 整理并修改usbd_storage_msd.c文件。
+   (1) 简单整理并添加如下调试：
+       //#define printf_ok			printf
+		#define printf_ok(...)
+
+		//#define printf_err			printf
+		#define printf_err(...)
+   (2) 简单修改函数的实现，其中变量SD_CardInfo SDCardInfo;在bsp_sido_sd.c文件，在其.h文件里面进行外部声明
+
+6. 新建一个usb_bsp_msc.h文件，专门供用户调用。
+
+7. usb_conf.h文件
+   1. 注释相应文件
+
+8. usb_dcd_int.c文件中函数简单修改
+   static uint32_t DCD_WriteEmptyTxFifo(USB_OTG_CORE_HANDLE *pdev, uint32_t epnum)
+   {
+     uint32_t fifoemptymsk;  /* 此处有bug，将其挪到前面 */
+   }
+   
+9. 工程中添加预编译宏定义：USE_USB_OTG_FS, USE_EMBEDDED_PHY, 其中 VBUS_SENSING_ENABLED 是可选的
+
+
+
+【使用方法】
+1. 主程序调用 USBD_Init() 函数完成USB的硬件配置。 需要 #include "usb_bsp.h"
+	USBD_Init(&USB_OTG_dev,
+		#ifdef USE_USB_OTG_HS
+			USB_OTG_HS_CORE_ID,
+		#else
+			USB_OTG_FS_CORE_ID,
+		#endif
+			&USR_desc,
+			&USBD_MSC_cb,
+			&USR_cb);
+
+2. 动态移除USB连接调用：
+	DCD_DevDisconnect(&USB_OTG_dev);
+
+3. 动态恢复USB连接，请重新调用：USBD_Init 函数
+		//DCD_DevConnect(&USB_OTG_dev);  这个不好使
+		USBD_Init(&USB_OTG_dev,
+			#ifdef USE_USB_OTG_HS
+				USB_OTG_HS_CORE_ID,
+			#else
+				USB_OTG_FS_CORE_ID,
+			#endif
+				&USR_desc,
+				&USBD_MSC_cb,
+				&USR_cb);
+				
+==========================================================================

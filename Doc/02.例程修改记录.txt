@@ -1,0 +1,62 @@
+V1.0    2016-01-20   Eric2013     首发
+--------------------------------------------
+1. uCOS-II的源码文件不再从官网下载（官网给的纯源码版本低），直接从MDK5的安装包里面获取，源码和移植文件比较全面且最新。
+2. FPU的解决方案采用官方的解决方案，不再使用我们自己写的FPU解决方案，方便以后的升级。
+   如果用户通过MDK或IAR编译器开启FPU的话，在MDK和IAR的启动文件中将执行（通过条件编译实现）：
+   a. 使能FPU.
+   b. 关闭浮点寄存器自动入栈。
+   c. 关闭lazy_stacking特性。
+3. os_dbg文件使用源码里面的os_dbg_r.c，因为这个版本比较新，而ports文件夹里面的版本低。
+4. MDK和IAR版本里面的os_cpu_a.asm都有一处bug，这个bug会导致启动任务启动浮点标志就死机
+   OSStartHighRdy
+    LDR     R0, =NVIC_SYSPRI14           
+    LDR     R1, =NVIC_PENDSV_PRI
+    STRB    R1, [R0]
+
+    MOVS    R0, #0                                
+    MSR     PSP, R0
+    ;BL      OSTaskSwHook   注释掉这句话，多余了。 
+5. MDK4.74选择1,2,3级优化的时候，uC/LIB会有一处警告：
+   ..\..\uCOS-II\uC-LIB\lib_str.c(3472): warning: C4017W: nbr_neg_fmtd may be used before being set
+   而IAR7.5选择最高优化是无警告的，MDK5.17也无警告。
+6. MDK4.74或者MDK5.17版本的移植文件os_cpu.c有警告，将其修改为如下：
+	#if (OS_CPU_HOOKS_EN > 0u) && (OS_TASK_SW_HOOK_EN > 0u)
+	
+	#if (OS_CPU_ARM_FP_EN > 0u) /* 将定义直接添加到这个源文件里面，要不MDK编译会有警告，看着不舒服，而IAR是不存在问题的，无需修改 */
+	void  OS_CPU_FP_Reg_Push     (OS_STK   *stkPtr);
+	void  OS_CPU_FP_Reg_Pop      (OS_STK   *stkPtr);
+	#endif
+	
+	void  OSTaskSwHook (void)
+	{
+
+	#if (OS_CPU_ARM_FP_EN > 0u)
+		if ((OSTCBCur->OSTCBOpt & OS_TASK_OPT_SAVE_FP) != (INT16U)0) {
+			OS_CPU_FP_Reg_Push(OSTCBCur->OSTCBStkPtr);
+		}
+
+		if ((OSTCBHighRdy->OSTCBOpt & OS_TASK_OPT_SAVE_FP) != (INT16U)0) {
+			OS_CPU_FP_Reg_Pop(OSTCBHighRdy->OSTCBStkPtr);
+		}
+	#endif
+
+	#if OS_APP_HOOKS_EN > 0u
+		App_TaskSwHook();
+	#endif
+	}
+	#endif
+7. 为了支持uC/Probe调试组件:
+   (1).MDK要勾选option->output -> Debug Infomation选项，选择优化等级0
+   (2).IAR要选择选择优化等级low，其中如下两个地方比勾选
+       a. option->C/C++ Compiler->Output选项中勾选Generate debug information。
+       b. option->linker->Output选项中勾选Include Generate debug information in output。
+   (3).使能uCOS-II宏定义
+       #define OS_DEBUG_EN               1u
+	   #define OS_TASK_STAT_EN           1u 同时初始化统计任务
+	   #define CPU_CFG_INT_DIS_MEAS_EN   1u 
+   (4).为了方便调试，参数OS_APP_HOOKS_EN，OS_ARG_CHK_EN和OS_CPU_HOOKS_EN都使能
+       
+8. IAR用的icf配置文件是直接从IAR的安装目录复制过来修改了文件名。
+   
+   
+   
